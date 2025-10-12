@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Paper,
   Typography,
@@ -11,15 +11,13 @@ import {
   Card,
   CardContent,
   CardHeader,
-  CardActions,
   IconButton,
   Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Chip,
-  Fade
+  Chip
 } from '@mui/material';
 import {
   Save as SaveIcon,
@@ -139,11 +137,7 @@ function Settings() {
   const [showInfo, setShowInfo] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
 
-  useEffect(() => {
-    loadEnvVars();
-  }, []);
-
-  const loadEnvVars = async () => {
+  const loadEnvVars = useCallback(async () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/env`);
@@ -156,7 +150,11 @@ function Settings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [enqueueSnackbar]);
+
+  useEffect(() => {
+    loadEnvVars();
+  }, [loadEnvVars]);
 
   const handleSave = async () => {
     setSaving(true);

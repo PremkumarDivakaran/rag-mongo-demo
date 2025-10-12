@@ -1,0 +1,20 @@
+MONGODB_URI=""
+
+DB_NAME=""
+
+COLLECTION_NAME="test_cases"
+VECTOR_INDEX_NAME="vector_index_test_cases"
+BM25_INDEX_NAME="bm25_search"
+
+USER_STORIES_COLLECTION_NAME="user_stories"
+USER_STORIES_VECTOR_INDEX_NAME="vector_index_user_story"
+
+TESTLEAF_API_BASE="https://api.testleaf.com/ai"
+USER_EMAIL=""
+AUTH_TOKEN=""
+
+# Jira Configuration
+JIRA_BASE_URL=""
+JIRA_EMAIL=""
+JIRA_API_TOKEN=""
+JIRA_PROJECT_KEY=""

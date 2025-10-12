@@ -13,10 +13,10 @@ async function deleteAllDocs() {
   try {
     await client.connect();
     const db = client.db(process.env.DB_NAME);
-    const collection = db.collection(process.env.COLLECTION_NAME);
+    const collection = db.collection(process.env.USER_STORIES_COLLECTION_NAME);
 
     const result = await collection.deleteMany({});
-    console.log(`🗑️ Deleted ${result.deletedCount} documents from ${process.env.COLLECTION_NAME}`);
+    console.log(`🗑️ Deleted ${result.deletedCount} documents from ${process.env.USER_STORIES_COLLECTION_NAME}`);
   } catch (err) {
     console.error("❌ Error:", err);
   } finally {

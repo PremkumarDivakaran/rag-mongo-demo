@@ -30,11 +30,11 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN;
 const USER_STORIES_COLLECTION = process.env.USER_STORIES_COLLECTION || 'user_stories';
 const USER_STORIES_DATA_FILE = "src/data/stories.json";
 
-// BATCH PROCESSING CONFIGURATION
-const BATCH_SIZE = 20; // Process 20 user stories at once
-const CONCURRENT_LIMIT = 8; // Max 8 concurrent API calls
-const DELAY_BETWEEN_BATCHES = 800; // 800ms delay between batches
-const MONGODB_BATCH_SIZE = 50; // Insert 50 documents at once
+// BATCH PROCESSING CONFIGURATION - Optimized for Testleaf Batch API
+const BATCH_SIZE = 100; // Send 100 user stories per batch API call (Testleaf can handle larger batches)
+const CONCURRENT_LIMIT = 5; // Max 5 concurrent batch API calls (fewer but larger requests)
+const DELAY_BETWEEN_BATCHES = 1000; // 1000ms delay between batches (batch calls take longer)
+const MONGODB_BATCH_SIZE = 200; // Insert 200 documents at once
 
 // Create limiters for different operations
 const embeddingLimit = pLimit(CONCURRENT_LIMIT);
@@ -70,23 +70,24 @@ function createUserStoryInputText(userStory) {
 }
 
 /**
- * Generate embedding for a single user story with retry logic
+ * Generate embeddings for a batch of user stories using Testleaf Batch API
  */
-async function generateUserStoryEmbedding(userStory, index, total, maxRetries = 3) {
+async function generateBatchUserStoryEmbeddings(userStoryBatch, batchNumber, totalBatches, maxRetries = 3) {
   return embeddingLimit(async () => {
-    const storyKey = userStory.key || `US-${index + 1}`;
-    const storySummary = userStory.summary || 'Untitled Story';
     let lastError;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Create comprehensive input text for embedding
-        const inputText = createUserStoryInputText(userStory);
+        // Prepare input texts for batch processing
+        const inputs = userStoryBatch.map(userStory => createUserStoryInputText(userStory));
         
+        console.log(`🚀 [Batch ${batchNumber}/${totalBatches}] Processing ${userStoryBatch.length} user stories...`);
+        
+        // Use Testleaf Batch API endpoint
         const embeddingResponse = await axios.post(
-          `${TESTLEAF_API_BASE}/embedding/text/${USER_EMAIL}`,
+          `${TESTLEAF_API_BASE}/embedding/batch/${USER_EMAIL}`,
           {
-            input: inputText,
+            inputs: inputs,
             model: "text-embedding-3-small"
           },
           {
@@ -94,54 +95,71 @@ async function generateUserStoryEmbedding(userStory, index, total, maxRetries = 
               'Content-Type': 'application/json',
               ...(AUTH_TOKEN && { 'Authorization': `Bearer ${AUTH_TOKEN}` })
             },
-            timeout: 30000
+            timeout: 300000 // Longer timeout for batch requests
           }
         );
 
         if (embeddingResponse.data.status !== 200) {
-          throw new Error(`API error: ${embeddingResponse.data.message}`);
+          throw new Error(`Batch API error: ${embeddingResponse.data.message}`);
         }
 
-        const vector = embeddingResponse.data.data[0].embedding;
-        const cost = embeddingResponse.data.cost || 0;
-        const tokens = embeddingResponse.data.usage?.total_tokens || 0;
+        const embeddings = embeddingResponse.data.data;
+        const totalCost = embeddingResponse.data.cost || 0;
+        const totalTokens = embeddingResponse.data.usage?.total_tokens || 0;
+        const model = embeddingResponse.data.model;
         
-        // Success - log every 50th item to avoid spam
-        if (index % 50 === 0 || index === total - 1) {
-          console.log(`✅ [${index + 1}/${total}] ${storyKey} | Cost: $${cost.toFixed(6)} | Tokens: ${tokens}`);
-        }
-
-        return {
+        // Map embeddings back to user stories
+        const results = userStoryBatch.map((userStory, index) => ({
           userStory,
-          embedding: vector,
-          cost,
-          tokens,
-          inputText,
+          embedding: embeddings[index].embedding,
+          cost: totalCost / userStoryBatch.length, // Distribute cost evenly
+          tokens: Math.round(totalTokens / userStoryBatch.length), // Distribute tokens evenly
+          inputText: inputs[index],
           metadata: {
-            model: embeddingResponse.data.model,
-            cost: cost,
-            tokens: tokens,
-            apiSource: 'testleaf',
-            inputTextLength: inputText.length,
+            model: model,
+            cost: totalCost / userStoryBatch.length,
+            tokens: Math.round(totalTokens / userStoryBatch.length),
+            apiSource: 'testleaf-batch',
+            inputTextLength: inputs[index].length,
+            batchNumber: batchNumber,
             generatedAt: new Date().toISOString()
           }
+        }));
+        
+        console.log(`✅ [Batch ${batchNumber}/${totalBatches}] Success! Cost: $${totalCost.toFixed(6)} | Tokens: ${totalTokens}`);
+        
+        return {
+          success: true,
+          results: results,
+          totalCost: totalCost,
+          totalTokens: totalTokens,
+          batchSize: userStoryBatch.length
         };
 
       } catch (error) {
         lastError = error;
         if (attempt < maxRetries) {
-          console.log(`⚠️ [${index + 1}/${total}] Retry ${attempt}/${maxRetries} for ${storyKey}: ${error.message}`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+          const waitTime = Math.min(1000 * Math.pow(2, attempt), 10000);
+          console.log(`⚠️ [Batch ${batchNumber}/${totalBatches}] Retry ${attempt}/${maxRetries}: ${error.message}`);
+          console.log(`   Waiting ${waitTime}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
         }
       }
     }
 
-    console.error(`❌ [${index + 1}/${total}] Final failure for ${storyKey}: ${lastError.message}`);
+    console.error(`❌ [Batch ${batchNumber}/${totalBatches}] Final failure: ${lastError.message}`);
     return {
-      userStory,
+      success: false,
       error: lastError.message,
-      cost: 0,
-      tokens: 0
+      results: userStoryBatch.map(userStory => ({
+        userStory,
+        error: lastError.message,
+        cost: 0,
+        tokens: 0
+      })),
+      totalCost: 0,
+      totalTokens: 0,
+      batchSize: userStoryBatch.length
     };
   });
 }
@@ -244,85 +262,97 @@ async function main() {
     const userStories = JSON.parse(fs.readFileSync(USER_STORIES_DATA_FILE, "utf-8"));
     const progress = new UserStoryProgressTracker(userStories.length);
 
-    console.log(`🚀 BATCH PROCESSING: ${userStories.length} user stories`);
-    console.log(`⚙️  Configuration for User Stories:`);
-    console.log(`   📦 Batch Size: ${BATCH_SIZE}`);
-    console.log(`   🔄 Concurrent API Calls: ${CONCURRENT_LIMIT}`);
+    console.log(`🚀 TESTLEAF BATCH API PROCESSING: ${userStories.length} user stories`);
+    console.log(`⚡ Using Testleaf Batch Embedding API for Maximum Efficiency!`);
+    console.log(`⚙️  Configuration for User Stories Batch API:`);
+    console.log(`   📦 Batch Size: ${BATCH_SIZE} user stories per API call`);
+    console.log(`   🔄 Concurrent Batch Calls: ${CONCURRENT_LIMIT}`);
     console.log(`   💾 MongoDB Batch Size: ${MONGODB_BATCH_SIZE}`);
-    console.log(`   ⏰ Delay Between Batches: ${DELAY_BETWEEN_BATCHES}ms`);
-    console.log(`   🌐 API Base: ${TESTLEAF_API_BASE}`);
+    console.log(`   ⏰ Delay Between Batch Groups: ${DELAY_BETWEEN_BATCHES}ms`);
+    console.log(`   🌐 API Endpoint: ${TESTLEAF_API_BASE}/embedding/batch/${USER_EMAIL}`);
     console.log(`   📧 User Email: ${USER_EMAIL}`);
     console.log(`   🗄️  Database: ${process.env.DB_NAME}`);
     console.log(`   📦 Collection: ${USER_STORIES_COLLECTION}`);
     
-    // Estimated time calculation
-    const estimatedTimePerStory = 150; // ms average with concurrency
-    const estimatedTotal = (userStories.length * estimatedTimePerStory) / 1000 / 60;
-    console.log(`   ⏱️  Estimated Time: ${estimatedTotal.toFixed(1)} minutes\n`);
+    // Create batches for concurrent processing
+    const batches = [];
+    for (let i = 0; i < userStories.length; i += BATCH_SIZE) {
+      batches.push({
+        userStories: userStories.slice(i, i + BATCH_SIZE),
+        batchNumber: Math.floor(i / BATCH_SIZE) + 1
+      });
+    }
+    
+    const totalBatches = batches.length;
+    
+    // Estimated time calculation for batch processing
+    const batchGroupsCount = Math.ceil(totalBatches / CONCURRENT_LIMIT);
+    const estimatedTimePerBatch = 3; // seconds average for batch API call
+    const estimatedTotal = (batchGroupsCount * estimatedTimePerBatch + (batchGroupsCount - 1) * DELAY_BETWEEN_BATCHES / 1000) / 60;
+    console.log(`   📊 Total Batches: ${totalBatches}`);
+    console.log(`   🏃 Batch Groups: ${batchGroupsCount}`);
+    console.log(`   ⏱️  Estimated Time: ${estimatedTotal.toFixed(1)} minutes (Much faster with batch API!)\n`);
 
     let totalCost = 0;
     let totalTokens = 0;
     let totalInserted = 0;
     let totalFailed = 0;
     let processedCount = 0;
+    console.log(`📦 Created ${totalBatches} batches of ~${BATCH_SIZE} user stories each\n`);
 
-    // Process in optimized batches
-    for (let i = 0; i < userStories.length; i += BATCH_SIZE) {
-      const batch = userStories.slice(i, i + BATCH_SIZE);
-      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(userStories.length / BATCH_SIZE);
+    // Process batches with concurrency control
+    for (let i = 0; i < batches.length; i += CONCURRENT_LIMIT) {
+      const concurrentBatches = batches.slice(i, i + CONCURRENT_LIMIT);
       
-      // Generate embeddings concurrently for this batch
-      const embeddingPromises = batch.map((userStory, batchIndex) => 
-        generateUserStoryEmbedding(userStory, i + batchIndex, userStories.length)
+      // Process multiple batches concurrently
+      const batchPromises = concurrentBatches.map(batch => 
+        generateBatchUserStoryEmbeddings(batch.userStories, batch.batchNumber, totalBatches)
       );
 
-      const embeddingResults = await Promise.allSettled(embeddingPromises);
+      const batchResults = await Promise.allSettled(batchPromises);
       
-      // Process results and prepare for DB insertion
-      const successfulEmbeddings = [];
-      let batchCost = 0;
-      let batchTokens = 0;
+      // Process results from concurrent batches
+      for (const batchResult of batchResults) {
+        if (batchResult.status === 'fulfilled') {
+          const result = batchResult.value;
+          
+          if (result.success) {
+            // Update progress tracking
+            processedCount += result.batchSize;
+            totalCost += result.totalCost;
+            totalTokens += result.totalTokens;
+            progress.update(processedCount, result.totalCost, result.totalTokens);
 
-      embeddingResults.forEach((result, index) => {
-        if (result.status === 'fulfilled' && !result.value.error) {
-          successfulEmbeddings.push(result.value);
-          batchCost += result.value.cost;
-          batchTokens += result.value.tokens;
-        }
-        processedCount++;
-      });
-
-      // Update progress
-      progress.update(processedCount, batchCost, batchTokens);
-
-      // Insert to MongoDB in smaller sub-batches if needed
-      let insertedInBatch = 0;
-      let failedInBatch = 0;
-
-      if (successfulEmbeddings.length > 0) {
-        for (let j = 0; j < successfulEmbeddings.length; j += MONGODB_BATCH_SIZE) {
-          const subBatch = successfulEmbeddings.slice(j, j + MONGODB_BATCH_SIZE);
-          const insertResult = await insertUserStoriesBatch(collection, subBatch);
-          insertedInBatch += insertResult.inserted;
-          failedInBatch += insertResult.failed;
+            // Insert successful embeddings to MongoDB
+            const successfulEmbeddings = result.results.filter(item => !item.error);
+            
+            if (successfulEmbeddings.length > 0) {
+              // Insert in sub-batches if needed
+              for (let j = 0; j < successfulEmbeddings.length; j += MONGODB_BATCH_SIZE) {
+                const subBatch = successfulEmbeddings.slice(j, j + MONGODB_BATCH_SIZE);
+                const insertResult = await insertUserStoriesBatch(collection, subBatch);
+                totalInserted += insertResult.inserted;
+                totalFailed += insertResult.failed;
+              }
+            }
+            
+            totalFailed += (result.batchSize - successfulEmbeddings.length);
+          } else {
+            // Handle failed batch
+            processedCount += result.batchSize;
+            totalFailed += result.batchSize;
+            progress.update(processedCount, 0, 0);
+            console.error(`❌ Batch failed: ${result.error}`);
+          }
+        } else {
+          console.error(`❌ Batch promise rejected:`, batchResult.reason);
         }
       }
 
-      totalCost += batchCost;
-      totalTokens += batchTokens;
-      totalInserted += insertedInBatch;
-      totalFailed += failedInBatch + (batch.length - successfulEmbeddings.length);
-
-      // Only log batch details for first few and last few batches to reduce spam
-      if (batchNumber <= 3 || batchNumber >= totalBatches - 2 || batchNumber % 10 === 0) {
-        console.log(`📦 User Stories Batch ${batchNumber}/${totalBatches}: ${insertedInBatch} inserted, ${failedInBatch} failed | Cost: $${batchCost.toFixed(6)}`);
-      }
-
-      // Smart delay - reduce delay as we process more to speed up
-      if (i + BATCH_SIZE < userStories.length) {
-        const adaptiveDelay = Math.max(200, DELAY_BETWEEN_BATCHES - (batchNumber * 15));
-        await new Promise(resolve => setTimeout(resolve, adaptiveDelay));
+      // Delay between concurrent batch groups
+      if (i + CONCURRENT_LIMIT < batches.length) {
+        console.log(`⏸️  Waiting ${DELAY_BETWEEN_BATCHES}ms before next batch group...`);
+        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
       }
     }
 
@@ -332,7 +362,7 @@ async function main() {
     console.log(`\n🎉 USER STORIES BATCH PROCESSING COMPLETE!`);
     console.log(`📊 Final Statistics:`);
     console.log(`   ⏱️  Total Time: ${progress.formatTime(totalTime)}`);
-    console.log(`   ⚡ Processing Rate: ${rate.toFixed(1)} stories/second`);
+    console.log(`   ⚡ Processing Rate: ${rate.toFixed(1)} user stories/second`);
     console.log(`   📝 Total User Stories: ${userStories.length}`);
     console.log(`   ✅ Successfully Processed: ${totalInserted}`);
     console.log(`   ❌ Failed: ${totalFailed}`);
@@ -342,6 +372,7 @@ async function main() {
     console.log(`   📊 Average Cost per Story: $${(totalCost / userStories.length).toFixed(8)}`);
     console.log(`   📊 Average Tokens per Story: ${Math.round(totalTokens / userStories.length)}`);
     console.log(`   💡 Speedup vs Sequential: ${((150 * userStories.length / 1000 / 60) / (totalTime / 60)).toFixed(1)}x faster`);
+    console.log(`   🚀 Batch API Efficiency: ${((userStories.length / totalBatches) * CONCURRENT_LIMIT).toFixed(1)} user stories processed per API call group`);
 
     // Vector index information
     console.log(`\n🔧 Vector Index Information:`);

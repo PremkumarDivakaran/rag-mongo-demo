@@ -23,7 +23,6 @@ import {
   Collapse,
   Switch,
   FormControlLabel,
-  useTheme,
   Fade
 } from '@mui/material';
 import {
@@ -36,15 +35,27 @@ import {
   ChevronLeft as ChevronLeftIcon,
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
-  NavigateNext as NavigateNextIcon
+  NavigateNext as NavigateNextIcon,
+  TextFields as KeywordIcon,
+  AutoFixHigh as HybridIcon,
+  CompareArrows as RerankIcon,
+  Psychology as PreprocessIcon,
+  Summarize as SummarizeIcon,
+  Schema as SchemaIcon
 } from '@mui/icons-material';
 import { SnackbarProvider } from 'notistack';
 
 // Import components
-import ConvertToJson from './components/ConvertToJson';
-import EmbeddingsStore from './components/EmbeddingsStore';
-import Settings from './components/Settings';
-import QuerySearch from './components/QuerySearch';
+import ConvertToJson from './components/data/ConvertToJson';
+import EmbeddingsStore from './components/data/EmbeddingsStore';
+import QuerySearch from './components/search/QuerySearch';
+import BM25Search from './components/search/BM25Search';
+import HybridSearch from './components/search/HybridSearch';
+import RerankingSearch from './components/search/RerankingSearch';
+import QueryPreprocessing from './components/processing/QueryPreprocessing';
+import SummarizationDedup from './components/processing/SummarizationDedup';
+import PromptSchemaManager from './components/processing/PromptSchemaManager';
+import Settings from './components/settings/Settings';
 
 // Enterprise color palette
 const createEnterpriseTheme = (mode) => createTheme({
@@ -154,18 +165,60 @@ const menuItems = [
     description: 'Create and manage embeddings'
   },
   { 
+    id: 'preprocess', 
+    label: 'Query Preprocessing', 
+    icon: <PreprocessIcon />, 
+    component: QueryPreprocessing,
+    description: 'Transform & expand queries'
+  },
+  { 
+    id: 'query', 
+    label: 'Vector Search', 
+    icon: <SearchIcon />, 
+    component: QuerySearch,
+    description: 'Semantic vector search'
+  },
+  { 
+    id: 'bm25', 
+    label: 'BM25 Search', 
+    icon: <KeywordIcon />, 
+    component: BM25Search,
+    description: 'Keyword-based search'
+  },
+  { 
+    id: 'hybrid', 
+    label: 'Hybrid Search', 
+    icon: <HybridIcon />, 
+    component: HybridSearch,
+    description: 'Combined BM25 + Vector'
+  },
+  { 
+    id: 'rerank', 
+    label: 'Score Fusion', 
+    icon: <RerankIcon />, 
+    component: RerankingSearch,
+    description: 'BM25+Vector fusion reranking'
+  },
+  { 
+    id: 'summarize', 
+    label: 'Summarize & Dedup', 
+    icon: <SummarizeIcon />, 
+    component: SummarizationDedup,
+    description: 'AI summarization & deduplication'
+  },
+  { 
+    id: 'prompt-schema', 
+    label: 'Prompt & Schema', 
+    icon: <SchemaIcon />, 
+    component: PromptSchemaManager,
+    description: 'Configure prompt templates & JSON schemas'
+  },
+  { 
     id: 'settings', 
     label: 'Settings', 
     icon: <SettingsIcon />, 
     component: Settings,
     description: 'Configure environment'
-  },
-  { 
-    id: 'query', 
-    label: 'Query Search', 
-    icon: <SearchIcon />, 
-    component: QuerySearch,
-    description: 'Search test cases'
   },
 ];
 
@@ -249,7 +302,7 @@ function App() {
               
               <DashboardIcon sx={{ mr: 2 }} />
               <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-                RAG MongoDB Pipeline
+                RAG Pipeline
               </Typography>
 
               <FormControlLabel
@@ -393,7 +446,7 @@ function App() {
             <Box sx={{ p: 2 }}>
               <Collapse in={drawerOpen} timeout={300}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                  RAG MongoDB Demo v1.0
+                  RAG Demo v1.2
                 </Typography>
                 <br />
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
@@ -420,7 +473,7 @@ function App() {
             <Toolbar />
             <Toolbar variant="dense" /> {/* Space for secondary toolbar */}
             
-            <Container maxWidth="xl" sx={{ mt: 2 }}>
+            <Container maxWidth={false} sx={{ mt: 2, px: 4 }}>
               <Fade in={true} timeout={500}>
                 <Box>
                   {getCurrentComponent()}

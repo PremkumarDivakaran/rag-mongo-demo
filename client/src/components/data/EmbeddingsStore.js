@@ -71,13 +71,8 @@ function EmbeddingsStore() {
     }
   }, [enqueueSnackbar]);
 
-  useEffect(() => {
-    loadFiles();
-    checkForActiveJobs();
-  }, [loadFiles]);
-
   // Check for active jobs on component mount (handles page refresh)
-  const checkForActiveJobs = async () => {
+  const checkForActiveJobs = useCallback(async () => {
     try {
       const response = await axios.get(`${API_BASE}/jobs/active`);
       if (response.data.jobs && response.data.jobs.length > 0) {
@@ -90,7 +85,12 @@ function EmbeddingsStore() {
     } catch (err) {
       console.error('Failed to check active jobs:', err);
     }
-  };
+  }, [enqueueSnackbar]);
+
+  useEffect(() => {
+    loadFiles();
+    checkForActiveJobs();
+  }, [loadFiles, checkForActiveJobs]);
 
   // Poll for job status when processing
   useEffect(() => {

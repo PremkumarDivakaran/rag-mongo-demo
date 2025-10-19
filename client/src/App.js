@@ -41,7 +41,8 @@ import {
   CompareArrows as RerankIcon,
   Psychology as PreprocessIcon,
   Summarize as SummarizeIcon,
-  Schema as SchemaIcon
+  Schema as SchemaIcon,
+  StarRate as RateIcon
 } from '@mui/icons-material';
 import { SnackbarProvider } from 'notistack';
 
@@ -55,6 +56,7 @@ import RerankingSearch from './components/search/RerankingSearch';
 import QueryPreprocessing from './components/processing/QueryPreprocessing';
 import SummarizationDedup from './components/processing/SummarizationDedup';
 import PromptSchemaManager from './components/processing/PromptSchemaManager';
+import UserStoryRating from './components/processing/UserStoryRating';
 import Settings from './components/settings/Settings';
 
 // Enterprise color palette
@@ -212,6 +214,13 @@ const menuItems = [
     icon: <SchemaIcon />, 
     component: PromptSchemaManager,
     description: 'Configure prompt templates & JSON schemas'
+  },
+  { 
+    id: 'story-rating', 
+    label: 'User Story Rating', 
+    icon: <RateIcon />, 
+    component: UserStoryRating,
+    description: 'RAG-powered user story analysis & rating'
   },
   { 
     id: 'settings', 
